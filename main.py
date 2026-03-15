@@ -13,12 +13,14 @@ from engine.structural_exits import (
     generate_bullish_structural_exits,
     generate_bearish_structural_exits,
 )
+from engine.bearish_flow_engine import generate_bearish_flow_trades
+
 
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
-API_KEY = "YOUR_API_KEY"
-API_SECRET = "YOUR_API_SECRET"
+API_KEY = "qgIgkUqGiPcGP7rbjmqcrEsnDsZH7TwFuxt0DW9yG1xou75Ksu1E1FwRWMXf7X7Y"
+API_SECRET = "Jz9Ep8iD5vGNHp3E9flLLnLV2N4eTJeqBTZSNgzpiqiN55WuSb8Zv39hJ0ttb8c7"
 
 SYMBOL = "BTCUSDT"
 INTERVAL = Client.KLINE_INTERVAL_15MINUTE
@@ -61,6 +63,11 @@ def main():
     today = datetime.utcnow().strftime("%d_%m_%Y")
     filename = f"{OUTPUT_FOLDER}/BTC15_{today}.xlsx"
 
+
+    bear_flow_trades_df = generate_bearish_flow_trades(df, sw_df, bear_rev_df, bull_rev_df)
+
+
+
     # 9. Export all sheets
     with pd.ExcelWriter(filename, engine="openpyxl") as writer:
         sw_df.to_excel(writer, sheet_name="Structure_Swings", index=False)
@@ -69,7 +76,9 @@ def main():
         bear_rev_df.to_excel(writer, sheet_name="Bearish_OB_Reversals", index=False)
         bear_mit_df.to_excel(writer, sheet_name="Bearish_OB_Mitigated", index=False)
         bull_trades_df.to_excel(writer, sheet_name="Bullish_Trades", index=False)
-        bear_trades_df.to_excel(writer, sheet_name="Bearish_Trades", index=False)
+        # bear_trades_df.to_excel(writer, sheet_name="Bearish_Trades", index=False)
+        bear_flow_trades_df.to_excel(writer, sheet_name="Bearish_Flow_Trades", index=False)
+
 
     print(f"\nDataset saved successfully:\n{filename}")
 
