@@ -1,4 +1,4 @@
-# engine/bearish_flow_engine.py
+# engine/bullish_flow_engine.py
 
 from __future__ import annotations
 
@@ -6,86 +6,84 @@ import numpy as np
 import pandas as pd
 
 
-def _find_next_ll_after(df_swings: pd.DataFrame, start_idx: int) -> pd.Series | None:
-    """Return the first LL swing row after a given candle index."""
-    ll_rows = df_swings[
-        (df_swings["type"] == "low")
-        & (df_swings["label"] == "LL")
+def _find_next_hh_after(df_swings: pd.DataFrame, start_idx: int) -> pd.Series | None:
+    """Return the first HH swing row after a given candle index."""
+    hh_rows = df_swings[
+        (df_swings["type"] == "high")
+        & (df_swings["label"] == "HH")
         & (df_swings["idx"] > start_idx)
     ]
 
-    if ll_rows.empty:
+    if hh_rows.empty:
         return None
 
-    return ll_rows.iloc[0]
+    return hh_rows.iloc[0]
 
 
-def _bullish_ob_retests_between(
-    bull_rev_df: pd.DataFrame,
-    start_idx: int,
-    end_idx: int | None,
+def _bearish_ob_retests_between(
+    bear_rev_df: pd.DataFrame,
+    retest_start_idx: int,
+    retest_end_idx: int | None,
+    min_hh_idx: int | None = None,
 ) -> pd.DataFrame:
     """
-    Return CONFIRMED bullish OB retests between two candle indices.
-
-    Important:
-    bull_rev_df is already assumed to contain only bullish OBs that passed
-    the strict bullish confirmation logic from bullish_ob.py.
+    Return confirmed bearish OB retests in a retest window, optionally requiring
+    that the bearish OB itself was formed after a minimum HH index.
     """
-    if bull_rev_df.empty:
-        return bull_rev_df.copy()
+    if bear_rev_df.empty:
+        return bear_rev_df.copy()
 
-    valid = bull_rev_df.dropna(subset=["OB_retest_idx"]).copy()
+    valid = bear_rev_df.dropna(subset=["OB_retest_idx", "HH_idx"]).copy()
 
-    if end_idx is None:
-        mask = valid["OB_retest_idx"] > start_idx
-    else:
-        mask = (
-            (valid["OB_retest_idx"] > start_idx)
-            & (valid["OB_retest_idx"] <= end_idx)
-        )
+    mask = valid["OB_retest_idx"] > retest_start_idx
+
+    if retest_end_idx is not None:
+        mask &= valid["OB_retest_idx"] <= retest_end_idx
+
+    if min_hh_idx is not None:
+        mask &= valid["HH_idx"] > min_hh_idx
 
     return valid[mask].sort_values("OB_retest_idx")
 
 
-def _get_overlapping_bearish_group(
-    bear_rev_df: pd.DataFrame,
+def _get_overlapping_bullish_group(
+    bull_rev_df: pd.DataFrame,
     current_row,
 ) -> pd.DataFrame:
     """
-    For a given bearish OB, find later bearish OBs that were confirmed
+    For a given bullish OB, find later bullish OBs that were confirmed
     after this one and before this OB's retest (if any).
     """
-    hh_time = current_row.HH_time
+    ll_time = current_row.LL_time
     ob_retest_time = getattr(current_row, "OB_retest_time", pd.NaT)
 
     if pd.isna(ob_retest_time):
-        group = bear_rev_df[bear_rev_df["HH_time"] > hh_time]
+        group = bull_rev_df[bull_rev_df["LL_time"] > ll_time]
     else:
-        group = bear_rev_df[
-            (bear_rev_df["HH_time"] > hh_time)
-            & (bear_rev_df["HH_time"] < ob_retest_time)
+        group = bull_rev_df[
+            (bull_rev_df["LL_time"] > ll_time)
+            & (bull_rev_df["LL_time"] < ob_retest_time)
         ]
 
-    return group.sort_values("HH_time")
+    return group.sort_values("LL_time")
 
 
 def _find_structural_break_exit(
     df: pd.DataFrame,
     entry_idx: int,
-    hh_high: float,
+    ll_low: float,
 ) -> tuple[int | None, pd.Timestamp | None, float | None, str]:
     """
-    Structural invalidation for a short:
-    first candle close above HH_high after entry.
+    Structural invalidation for a long:
+    first candle close below LL_low after entry.
     """
     for candle_idx in range(entry_idx + 1, len(df)):
-        if df.loc[candle_idx, "close"] > hh_high:
+        if df.loc[candle_idx, "close"] < ll_low:
             return (
                 candle_idx,
                 df.loc[candle_idx, "time"],
                 df.loc[candle_idx, "close"],
-                "structural_break_HH",
+                "structural_break_LL",
             )
 
     return None, None, None, "no_structural_break_found"
@@ -102,17 +100,17 @@ def _make_trade_record(
     exit_time,
     exit_price: float | None,
     exit_reason: str | None,
-    ll_anchor_time,
-    ll_anchor_idx: int | None,
+    hh_anchor_time,
+    hh_anchor_idx: int | None,
 ) -> dict:
-    """Build one bearish flow trade record."""
+    """Build one bullish flow trade record."""
     return {
         "scenario": scenario,
-        "direction": "short",
-        "HH_time": primary_ob_row.HH_time,
-        "HH_idx": primary_ob_row.HH_idx,
-        "HH_low": primary_ob_row.HH_low,
-        "HH_high": primary_ob_row.HH_high,
+        "direction": "long",
+        "LL_time": primary_ob_row.LL_time,
+        "LL_idx": primary_ob_row.LL_idx,
+        "LL_low": primary_ob_row.LL_low,
+        "LL_high": primary_ob_row.LL_high,
         "entry_time": entry_time,
         "entry_idx": entry_idx,
         "entry_price": entry_price,
@@ -120,24 +118,24 @@ def _make_trade_record(
         "exit_idx": exit_idx,
         "exit_price": exit_price,
         "exit_reason": exit_reason,
-        "LL_anchor_time": ll_anchor_time,
-        "LL_anchor_idx": ll_anchor_idx,
+        "HH_anchor_time": hh_anchor_time,
+        "HH_anchor_idx": hh_anchor_idx,
     }
 
 
-def _resolve_primary_bearish_ob(
-    bear_rev_df: pd.DataFrame,
+def _resolve_primary_bullish_ob(
+    bull_rev_df: pd.DataFrame,
     row,
     row_ob_id: int,
     used_as_primary: set[int],
 ) -> tuple[object, int, str]:
     """
-    Resolve which bearish OB should be treated as primary for execution
-    when later bearish OBs appear before the current OB retest.
+    Resolve which bullish OB should be treated as primary for execution
+    when later bullish OBs appear before the current OB retest.
 
-    Core behavior preserved.
+    Behavior mirrors bearish_flow_engine structure.
     """
-    overlapping = _get_overlapping_bearish_group(bear_rev_df, row)
+    overlapping = _get_overlapping_bullish_group(bull_rev_df, row)
 
     scenario = "Scenario_1_or_2"
     primary_ob_row = row
@@ -161,9 +159,9 @@ def _resolve_primary_bearish_ob(
             primary_ob_row = ob2
             primary_ob_id = ob2.Index
 
-    same_level = np.isclose(primary_ob_row.HH_high, row.HH_high) and np.isclose(
-        primary_ob_row.HH_low,
-        row.HH_low,
+    same_level = np.isclose(primary_ob_row.LL_high, row.LL_high) and np.isclose(
+        primary_ob_row.LL_low,
+        row.LL_low,
     )
 
     if earliest_retest_owner == "OB2":
@@ -179,13 +177,13 @@ def _resolve_primary_bearish_ob(
     return primary_ob_row, primary_ob_id, scenario
 
 
-def _resolve_exit_after_first_ll(
+def _resolve_exit_after_first_hh(
     df: pd.DataFrame,
     sw_df: pd.DataFrame,
-    bull_rev_df: pd.DataFrame,
+    bear_rev_df: pd.DataFrame,
     primary_ob_row,
     entry_idx: int,
-    ll_anchor_idx: int,
+    hh_anchor_idx: int,
 ) -> tuple[
     int | None,
     pd.Timestamp | None,
@@ -194,11 +192,10 @@ def _resolve_exit_after_first_ll(
     str,
 ]:
     """
-    Resolve exit once first LL after entry exists.
+    Resolve exit once first HH after entry exists.
 
     Important:
-    We no longer re-check bullish confirmation here.
-    bull_rev_df is already the source of truth for confirmed bullish OBs.
+    We trust bear_rev_df as the source of truth for confirmed bearish OBs.
 
     Returns:
         exit_idx,
@@ -214,69 +211,72 @@ def _resolve_exit_after_first_ll(
     scenario_used = "Scenario_1_or_2"
 
     # Scenario 1:
-    # Exit on first CONFIRMED bullish OB retest after first LL anchor.
-    bull_retests_after_ll = _bullish_ob_retests_between(
-        bull_rev_df,
-        ll_anchor_idx,
-        None,
+    # Exit on first CONFIRMED bearish OB retest after first HH anchor,
+    # but only if that bearish OB was formed after long entry.
+    bear_retests_after_hh = _bearish_ob_retests_between(
+        bear_rev_df,
+        retest_start_idx=hh_anchor_idx,
+        retest_end_idx=None,
+        min_hh_idx=entry_idx,
     )
 
-    if not bull_retests_after_ll.empty:
-        first_bull = bull_retests_after_ll.iloc[0]
-        exit_idx = int(first_bull.OB_retest_idx)
-        exit_time = first_bull.OB_retest_time
+    if not bear_retests_after_hh.empty:
+        first_bear = bear_retests_after_hh.iloc[0]
+        exit_idx = int(first_bear.OB_retest_idx)
+        exit_time = first_bear.OB_retest_time
         exit_price = df.loc[exit_idx, "close"]
-        exit_reason = "bullish_OB_retest_after_LL"
+        exit_reason = "bearish_OB_retest_after_HH"
         scenario_used = "Scenario_1_normal_flow"
         return exit_idx, exit_time, exit_price, exit_reason, scenario_used
 
     # Scenario 2: continuation flow
-    next_ll = _find_next_ll_after(sw_df, ll_anchor_idx)
+    next_hh = _find_next_hh_after(sw_df, hh_anchor_idx)
 
-    if next_ll is not None:
-        bull_between = _bullish_ob_retests_between(
-            bull_rev_df,
-            ll_anchor_idx,
-            int(next_ll.idx),
+    if next_hh is not None:
+        bear_between = _bearish_ob_retests_between(
+            bear_rev_df,
+            retest_start_idx=hh_anchor_idx,
+            retest_end_idx=int(next_hh.idx),
+            min_hh_idx=entry_idx,
         )
 
-        if not bull_between.empty:
-            first_bull = bull_between.iloc[0]
-            exit_idx = int(first_bull.OB_retest_idx)
-            exit_time = first_bull.OB_retest_time
+        if not bear_between.empty:
+            first_bear = bear_between.iloc[0]
+            exit_idx = int(first_bear.OB_retest_idx)
+            exit_time = first_bear.OB_retest_time
             exit_price = df.loc[exit_idx, "close"]
-            exit_reason = "bullish_OB_retest_between_LL_chain"
-            scenario_used = "Scenario_2_continuation_exit_on_bullish"
+            exit_reason = "bearish_OB_retest_between_HH_chain"
+            scenario_used = "Scenario_2_continuation_exit_on_bearish"
             return exit_idx, exit_time, exit_price, exit_reason, scenario_used
 
-        scenario_used = "Scenario_2_continuation_no_bullish_retest"
+        scenario_used = "Scenario_2_continuation_no_bearish_retest"
         return exit_idx, exit_time, exit_price, exit_reason, scenario_used
 
-    scenario_used = "Scenario_2_continuation_no_next_LL"
+    scenario_used = "Scenario_2_continuation_no_next_HH"
     return exit_idx, exit_time, exit_price, exit_reason, scenario_used
 
 
-def generate_bearish_flow_trades(
+def generate_bullish_flow_trades(
     df: pd.DataFrame,
     sw_df: pd.DataFrame,
-    bear_rev_df: pd.DataFrame,
     bull_rev_df: pd.DataFrame,
+    bear_rev_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Implements bearish OB flow with:
-    - Scenario 1: normal flow (exit on first confirmed bullish OB retest after LL)
+    Implements bullish OB flow with:
+    - Scenario 1: normal flow (exit on first confirmed bearish OB retest after HH)
     - Scenario 2: continuation flow
-    - Scenario 3/4: overlapping bearish OBs with priority rules
+    - Scenario 3/4: overlapping bullish OBs with priority rules
 
-    Core bearish flow behavior preserved, but bullish exit validation now
-    trusts bull_rev_df as the confirmed bullish source of truth.
+    Bullish entries come from confirmed bullish OB retests.
+    Bearish exits come only from confirmed bearish OB retests.
     """
     trades: list[dict] = []
 
-    bear_rev_df = bear_rev_df.sort_values("HH_time").reset_index(drop=True)
+    bull_rev_df = bull_rev_df.sort_values("LL_time").reset_index(drop=True)
     used_as_primary: set[int] = set()
 
-    for row in bear_rev_df.itertuples():
+    for row in bull_rev_df.itertuples():
         ob_id = row.Index
 
         if ob_id in used_as_primary:
@@ -285,8 +285,8 @@ def generate_bearish_flow_trades(
         if pd.isna(row.OB_retest_idx):
             continue
 
-        primary_ob_row, primary_ob_id, overlap_scenario = _resolve_primary_bearish_ob(
-            bear_rev_df=bear_rev_df,
+        primary_ob_row, primary_ob_id, overlap_scenario = _resolve_primary_bullish_ob(
+            bull_rev_df=bull_rev_df,
             row=row,
             row_ob_id=ob_id,
             used_as_primary=used_as_primary,
@@ -299,13 +299,13 @@ def generate_bearish_flow_trades(
         entry_time = primary_ob_row.OB_retest_time
         entry_price = df.loc[entry_idx, "close"]
 
-        first_ll = _find_next_ll_after(sw_df, entry_idx)
+        first_hh = _find_next_hh_after(sw_df, entry_idx)
 
-        if first_ll is None:
+        if first_hh is None:
             exit_idx, exit_time, exit_price, exit_reason = _find_structural_break_exit(
                 df=df,
                 entry_idx=entry_idx,
-                hh_high=primary_ob_row.HH_high,
+                ll_low=primary_ob_row.LL_low,
             )
 
             scenario_used = overlap_scenario
@@ -321,18 +321,18 @@ def generate_bearish_flow_trades(
                     exit_time=exit_time,
                     exit_price=exit_price,
                     exit_reason=(
-                        "no_LL_structural_only"
+                        "no_HH_structural_only"
                         if exit_reason == "no_structural_break_found"
                         else exit_reason
                     ),
-                    ll_anchor_time=None,
-                    ll_anchor_idx=None,
+                    hh_anchor_time=None,
+                    hh_anchor_idx=None,
                 )
             )
             continue
 
-        ll_anchor_idx = int(first_ll.idx)
-        ll_anchor_time = first_ll.time
+        hh_anchor_idx = int(first_hh.idx)
+        hh_anchor_time = first_hh.time
 
         (
             exit_idx,
@@ -340,13 +340,13 @@ def generate_bearish_flow_trades(
             exit_price,
             exit_reason,
             scenario_used,
-        ) = _resolve_exit_after_first_ll(
+        ) = _resolve_exit_after_first_hh(
             df=df,
             sw_df=sw_df,
-            bull_rev_df=bull_rev_df,
+            bear_rev_df=bear_rev_df,
             primary_ob_row=primary_ob_row,
             entry_idx=entry_idx,
-            ll_anchor_idx=ll_anchor_idx,
+            hh_anchor_idx=hh_anchor_idx,
         )
 
         if exit_idx is None:
@@ -354,7 +354,7 @@ def generate_bearish_flow_trades(
                 _find_structural_break_exit(
                     df=df,
                     entry_idx=entry_idx,
-                    hh_high=primary_ob_row.HH_high,
+                    ll_low=primary_ob_row.LL_low,
                 )
             )
 
@@ -375,10 +375,10 @@ def generate_bearish_flow_trades(
                 exit_time=exit_time,
                 exit_price=exit_price,
                 exit_reason=exit_reason,
-                ll_anchor_time=ll_anchor_time,
-                ll_anchor_idx=ll_anchor_idx,
+                hh_anchor_time=hh_anchor_time,
+                hh_anchor_idx=hh_anchor_idx,
             )
         )
 
-    print("BEAR FLOW TRADES:", len(trades))
+    print("BULL FLOW TRADES:", len(trades))
     return pd.DataFrame(trades)
