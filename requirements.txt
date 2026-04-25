@@ -1,0 +1,8 @@
+# Runtime dependencies for LearnTrading.
+# Pin to lower bounds known to work; bump as needed.
+
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+python-binance>=1.0.19,<2.0
+openpyxl>=3.1,<4.0
+python-dotenv>=1.0,<2.0
