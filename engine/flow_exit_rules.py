@@ -1,35 +1,5 @@
 # engine/flow_exit_rules.py
 
-def is_bullish_ob_retest_after_ll(time, idx, high, low, close, swing_type):
-    return False  # TODO: plug in real logic
-
-def is_structural_break_hh(time, idx, high, low, close, swing_type):
-    return False  # TODO: plug in real logic
-
-def get_last_ll_time():
-    return None
-
-def get_last_ll_idx():
-    return None
-
-def check_structural_exit(time, idx, high, low, close, swing_type, trade):
-    if is_bullish_ob_retest_after_ll(time, idx, high, low, close, swing_type):
-        return {
-            "exit_price": close,
-            "reason": "bullish_OB_retest_after_LL",
-            "ll_anchor_time": get_last_ll_time(),
-            "ll_anchor_idx": get_last_ll_idx()
-        }
-
-    if is_structural_break_hh(time, idx, high, low, close, swing_type):
-        return {
-            "exit_price": close,
-            "reason": "structural_break_HH"
-        }
-
-    return None
-
-
 def is_entry_bar_for_bearish_ob(
     ob,
     time,

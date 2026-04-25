@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def detect_pivots(df: pd.DataFrame, left: int = 3, right: int = 3) -> pd.DataFrame:
+def detect_pivots(df: pd.DataFrame, left: int = 5, right: int = 5) -> pd.DataFrame:
     highs = df["high"].values
     lows = df["low"].values
 
